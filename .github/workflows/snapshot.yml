@@ -1,0 +1,43 @@
+name: Refresh snapshot
+
+# ดึง snapshot จาก GAS (ฐานข้อมูล bk2) มาเก็บเป็น data.json แล้วเสิร์ฟผ่าน GitHub Pages (CDN)
+# - ทุก 15 นาที (GitHub อาจหน่วงได้บ้าง) + กดรันเองได้จากแท็บ Actions
+# - commit เฉพาะตอนข้อมูลเปลี่ยน
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: snapshot
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch snapshot from GAS
+        run: |
+          GAS='https://script.google.com/macros/s/AKfycbySCzrwWPDG6jL5LNKqV9LT8dvLZlv7JOz80GwksQjHvtJ5SWOvxl1OfymtTpvN750/exec'
+          curl -sL --retry 3 --retry-delay 5 "$GAS?action=getSnapshot" -o data.new.json
+          # ตรวจว่าได้ JSON ที่ ok:true จริง (กัน GAS error / หน้า login / redirect เพี้ยน)
+          python3 -c "import json,sys; d=json.load(open('data.new.json',encoding='utf-8')); sys.exit(0 if d.get('ok') else 1)"
+          mv data.new.json data.json
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "snapshot-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git diff --quiet -- data.json; then
+            echo "ไม่มีการเปลี่ยนแปลง — ข้าม commit"
+          else
+            git add data.json
+            git commit -m "snapshot: update $(date -u +%FT%TZ)"
+            git push
+          fi
