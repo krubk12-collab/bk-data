@@ -1,0 +1,41 @@
+name: Refresh supervision
+
+# ดึงข้อมูลนิเทศ (ผลประเมิน + รายชื่อครู) จาก GAS มาเก็บเป็น supervision.json เสิร์ฟผ่าน CDN
+# - ทุก 30 นาที + กดรันเองได้ (นิเทศเป็น dashboard อ่านอย่างเดียว ผลประเมินมาจาก Google Form)
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: supervision
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch supervision data from GAS
+        run: |
+          URL='https://script.google.com/macros/s/AKfycbwMWJrqTBRVngn-7THkrptWjbBC803G4kdGaPpRRL_7DEMObj7v0G4JOCAqekTocnVQCA/exec'
+          curl -sL --retry 3 --retry-delay 5 "$URL" -o sv.new.json
+          python3 -c "import json,sys; d=json.load(open('sv.new.json',encoding='utf-8')); sys.exit(0 if d.get('status')=='success' else 1)"
+          mv sv.new.json supervision.json
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "snapshot-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git diff --quiet -- supervision.json; then
+            echo "ไม่มีการเปลี่ยนแปลง — ข้าม commit"
+          else
+            git add supervision.json
+            git commit -m "supervision: update $(date -u +%FT%TZ)"
+            git push
+          fi
